@@ -1,0 +1,5 @@
+# Append to ~/.codex/config.toml (root level, not inside a table).
+# Codex runs this after every completed turn and passes a JSON payload
+# containing "last-assistant-message". speak.py finds the ===SPEAK=== block
+# and speaks it through the Kokoro container.
+notify = ["python3", "/ABSOLUTE/PATH/TO/talking-computer/speak.py", "--notify"]

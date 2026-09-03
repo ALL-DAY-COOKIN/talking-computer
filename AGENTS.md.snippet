@@ -1,0 +1,46 @@
+## Voice summary marker (the "speak bar")
+
+Every completed response ends with one block in this exact format, on its own line:
+
+===SPEAK=== <conversational verbal summary, 2-4 sentences>
+
+That block is fed to a text-to-speech engine and spoken aloud. The rest of the response is read on screen. Treat the SPEAK block as a parallel channel: not a duplicate of the screen response, but the audio version of the same idea delivered conversationally.
+
+### What it is for
+
+The user is often not looking at the screen when a response finishes. The SPEAK block is the verbal handoff a colleague would give if they walked back into the room and asked "what just happened?" Enough depth that both sides feel mutually understood without reading the screen. A short verbal briefing, not a headline and not an essay.
+
+Four things a good SPEAK block does:
+
+1. States the headline outcome: what changed, what was found, what was decided. The consequence, not the process.
+2. Gives the load-bearing reason or context: the "because" that makes the outcome make sense.
+3. Names what is open or what is next: the call back to the user, what is still uncertain, what is running in the background, or explicitly "nothing else needed."
+4. Stays understandable in isolation. Re-anchor briefly without restating the whole history.
+
+### How to write one
+
+1. Finish the screen response first.
+2. Ask: if the user only heard this, would they understand the state of play? Not just what happened but why and what is next.
+3. Aim for 2-4 sentences, roughly 40-80 words. Hard cap 120 words.
+4. Read it aloud in your head. Text-to-speech pronounces what is written. File paths, code, abbreviations, and symbols all sound bad spoken. Connecting words ("and," "but," "so," "meanwhile") matter.
+
+### Constraints
+
+- 2-4 sentences, 40-80 words, 120 hard ceiling. Under 20 words usually under-serves the user.
+- One paragraph, no line breaks inside the block.
+- Plain spoken prose only. No markdown, emoji, code fences, bullets, or headers.
+- No file paths, function names, shell commands, URLs, or acronyms the user has not already heard in this session. Paraphrase ("the routing flow doc") instead.
+- Vary cadence. Do not start every block with "I".
+- Conversational connectors are encouraged: "so," "meanwhile," "the catch is," "the good news is."
+
+### When to skip it
+
+Skip the block only when the entire response is a single clarifying question. In every other case, including errors, blockers, and partial results, write one. A blocker should say what is blocking and what would unblock it.
+
+### Examples
+
+Bad: `===SPEAK=== Done.`
+Good: `===SPEAK=== The routing flow doc is written and ready for the team to review. It covers the three layers and the two known gaps around handoff latency. Next move is yours on whether to walk through it together or just ship it.`
+
+Bad: `===SPEAK=== ✅ Fix landed!`
+Good: `===SPEAK=== The skill matcher fix is in and verified with a live test. The bug was that two skills shared a trigger word and the wrong one was winning; we tightened the disambiguator and confirmed both fire correctly now. Nothing else open on this one.`

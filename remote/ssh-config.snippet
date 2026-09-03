@@ -1,0 +1,10 @@
+# Add to ~/.ssh/config ON THE LAPTOP (the machine with speakers).
+# Every normal `ssh devbox` login then carries the speak tunnel with it:
+# the server's 127.0.0.1:9876 is forwarded back to the laptop's listener.
+Host devbox
+    HostName 192.168.1.50          # <- server IP or name
+    User you                        # <- server login
+    RemoteForward 9876 127.0.0.1:9876
+    ExitOnForwardFailure no         # keep the login even if 9876 is busy from an older session
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
