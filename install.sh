@@ -3,22 +3,38 @@
 # What it does:
 #   1. checks docker, python3, and an audio player
 #   2. starts the Kokoro container (docker compose up -d) and waits for it
-#   3. wires Codex: adds the `notify` line to ~/.codex/config.toml
-#   4. installs the SPEAK contract into ~/.codex/AGENTS.md
-#   5. speaks a test sentence so you know it works
-# Flags: --no-codex        skip the Codex config and AGENTS.md steps
-#        --no-contract     do the notify line but not AGENTS.md (guide phase 3)
-#        --contract-only   do AGENTS.md only, skip Docker and notify (guide phase 4)
+#   3. wires every agent it finds: Codex (`notify` in ~/.codex/config.toml) and
+#      Claude Code (`Stop` hook in ~/.claude/settings.json)
+#   4. installs the SPEAK rule into ~/.codex/AGENTS.md and/or ~/.claude/CLAUDE.md
+#   5. the chosen voice says setup is done
+# Flags: --agent codex|claude|both   which agent to wire (default: whichever is installed)
+#        --no-contract               do the hook but not the rule file (guide phase 3)
+#        --contract-only             do the rule file only, skip Docker and hook (guide phase 4)
 #        (two-machine setups: see remote/README.md)
 set -euo pipefail
 KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
-DO_CODEX=1; REMOTE=0; DO_NOTIFY=1; DO_CONTRACT=1; DO_DOCKER=1; DO_TEST=1
+CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+REMOTE=0; DO_NOTIFY=1; DO_CONTRACT=1; DO_DOCKER=1; DO_TEST=1; AGENT=""
+prev=""
 for a in "$@"; do case "$a" in
-  --no-codex) DO_CODEX=0;; --remote) REMOTE=1;;
+  --remote) REMOTE=1;;
   --no-contract) DO_CONTRACT=0;;
   --contract-only) DO_NOTIFY=0; DO_DOCKER=0; DO_TEST=0;;
-esac; done
+  codex|claude|both) [[ "$prev" == "--agent" ]] && AGENT="$a";;
+esac; prev="$a"; done
+# detect agents when not told
+if [[ -z "$AGENT" ]]; then
+  HAVE_CODEX=0; HAVE_CLAUDE=0
+  { command -v codex >/dev/null || [[ -d "$CODEX_DIR" ]]; } && HAVE_CODEX=1
+  { command -v claude >/dev/null || [[ -d "$CLAUDE_DIR" ]]; } && HAVE_CLAUDE=1
+  if [[ $HAVE_CODEX -eq 1 && $HAVE_CLAUDE -eq 1 ]]; then AGENT=both
+  elif [[ $HAVE_CLAUDE -eq 1 ]]; then AGENT=claude
+  else AGENT=codex; fi
+fi
+DO_CODEX=0; DO_CLAUDE=0
+[[ "$AGENT" == codex || "$AGENT" == both ]] && DO_CODEX=1
+[[ "$AGENT" == claude || "$AGENT" == both ]] && DO_CLAUDE=1
 REMOTE_URL="http://127.0.0.1:${SPEAK_LISTEN_PORT:-9876}"
 say() { printf '\033[0;32m[talking-computer]\033[0m %s\n' "$*"; }
 die() { printf '\033[0;31m[talking-computer] %s\033[0m\n' "$*" >&2; exit 1; }
@@ -41,6 +57,7 @@ elif [[ "$(uname -s)" == "Linux" ]]; then
 fi
 say "prerequisites OK"
 fi
+say "agents to wire: $AGENT"
 
 # 2. Kokoro container
 if [[ $REMOTE -eq 0 && $DO_DOCKER -eq 1 ]]; then
@@ -94,6 +111,36 @@ if [[ $DO_CODEX -eq 1 && $DO_CONTRACT -eq 1 ]]; then
   else
     { echo; cat "$KIT_DIR/AGENTS.md.snippet"; } >> "$AG"
     say "appended SPEAK contract to $AG"
+  fi
+fi
+
+# 3b/4b. Claude Code: Stop hook + CLAUDE.md rule
+if [[ $DO_CLAUDE -eq 1 ]]; then
+  mkdir -p "$CLAUDE_DIR"
+  if [[ $DO_NOTIFY -eq 1 ]]; then
+    say "what: adding a Stop hook to $CLAUDE_DIR/settings.json   why: so Claude Code hands each finished reply to speak.py"
+    SET="$CLAUDE_DIR/settings.json"; [[ -f "$SET" ]] || echo '{}' > "$SET"
+    if [[ $REMOTE -eq 1 ]]; then HOOK_CMD="SPEAK_REMOTE_URL=$REMOTE_URL python3 $KIT_DIR/speak.py --stop-hook"
+    else HOOK_CMD="python3 $KIT_DIR/speak.py --stop-hook"; fi
+    python3 - "$SET" "$HOOK_CMD" <<'PYEOF'
+import json, sys
+path, cmd = sys.argv[1], sys.argv[2]
+try:
+    cfg = json.load(open(path))
+except Exception:
+    cfg = {}
+stops = cfg.setdefault("hooks", {}).setdefault("Stop", [])
+stops[:] = [s for s in stops if "speak.py --stop-hook" not in json.dumps(s)]
+stops.append({"matcher": "", "hooks": [{"type": "command", "command": cmd}]})
+json.dump(cfg, open(path, "w"), indent=2)
+PYEOF
+    say "Stop hook set in $SET"
+  fi
+  if [[ $DO_CONTRACT -eq 1 ]]; then
+    say "what: appending the SPEAK section to $CLAUDE_DIR/CLAUDE.md   why: this is the rule that makes every reply end with a spoken block"
+    CM="$CLAUDE_DIR/CLAUDE.md"; touch "$CM"
+    if grep -q '===SPEAK===' "$CM"; then say "SPEAK rule already present in $CM"
+    else { echo; cat "$KIT_DIR/AGENTS.md.snippet"; } >> "$CM"; say "appended SPEAK rule to $CM"; fi
   fi
 fi
 

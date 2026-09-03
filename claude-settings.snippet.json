@@ -1,0 +1,8 @@
+{
+  "_comment": "Merge into ~/.claude/settings.json. Claude Code runs this after every completed turn; speak.py reads the transcript, finds the ===SPEAK=== block, and speaks it.",
+  "hooks": {
+    "Stop": [
+      { "matcher": "", "hooks": [ { "type": "command", "command": "python3 /ABSOLUTE/PATH/TO/talking-computer/speak.py --stop-hook" } ] }
+    ]
+  }
+}

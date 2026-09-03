@@ -24,7 +24,7 @@ Follow the same rhythm as the main guide: explain, ask, do, prove, summarize.
 
 **On the server (agent):**
 1. Copy or clone this folder.
-2. `bash install.sh --remote`. It writes the notify line with `SPEAK_REMOTE_URL=http://127.0.0.1:9876` and appends the contract. No Docker.
+2. `bash install.sh --remote`. It wires the hook for whichever agent is installed (Codex notify line, Claude Code Stop hook) with `SPEAK_REMOTE_URL=http://127.0.0.1:9876`, and appends the rule. No Docker.
 3. Prove, with the tunnel open: `curl http://127.0.0.1:9876` on the server prints the "alive" line, and `curl -X POST --data-raw "tunnel test" http://127.0.0.1:9876` is heard on the laptop.
 
 If step 3 is silent: the tunnel is not open (log in again or run tunnel.sh), or the listener is down (`launchctl list | grep speak` on macOS, `systemctl --user status talking-computer-listener` on Linux).

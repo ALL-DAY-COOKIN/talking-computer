@@ -2,16 +2,16 @@
 
 Your coding agent finishes a task and tells you out loud what happened.
 
-Talking Computer makes Codex end every reply with a short spoken summary, played through your speakers by a small text-to-speech engine that runs locally in Docker. Nothing leaves your machine. You can be in the kitchen, on a walk, or holding a kid, and still hear what changed, why, and what's next, like a colleague giving you the two-sentence version on the way to the coffee machine. The screen keeps the full detail for when you sit back down.
+Talking Computer makes Codex or Claude Code end every reply with a short spoken summary, played through your speakers by a small text-to-speech engine that runs locally in Docker. Nothing leaves your machine. You can be in the kitchen, on a walk, or holding a kid, and still hear what changed, why, and what's next, like a colleague giving you the two-sentence version on the way to the coffee machine. The screen keeps the full detail for when you sit back down.
 
 ## Install
 
 ```
 git clone https://github.com/trheard/talking-computer && cd talking-computer
-codex "Read SETUP-FOR-CODEX.md and do what it says."
+codex "Install this."        # or:  claude "Install this."
 ```
 
-Codex walks you through it in four short phases and explains each one before touching anything. The first thing you hear is the voice introducing itself. Then four voices audition for the job and you pick one and name it. The last thing you hear is that voice saying setup is done. About ten minutes, most of it the one-time image download.
+Either agent finds the instructions in this folder and walks you through it in four short phases and explains each one before touching anything. The first thing you hear is the voice introducing itself. Then four voices audition for the job and you pick one and name it. The last thing you hear is that voice saying setup is done. About ten minutes, most of it the one-time image download.
 
 Prefer to do it by hand? `bash install.sh` does the same steps without the conversation.
 
@@ -27,7 +27,7 @@ Prefer to do it by hand? `bash install.sh` does the same steps without the conve
 ```
 agent finishes a reply
   -> its last paragraph is "===SPEAK=== <2-4 spoken sentences>"   (AGENTS.md rule)
-  -> Codex runs the notify hook with the reply text                (config.toml)
+  -> the agent's turn-finished hook runs speak.py                  (notify line, or Stop hook)
   -> speak.py pulls that line and asks Kokoro on :8880 for audio   (docker-compose.yml)
   -> plays it in your chosen voice                                 (your speakers)
 ```
@@ -36,17 +36,19 @@ agent finishes a reply
 
 | File | Purpose |
 |---|---|
-| `SETUP-FOR-CODEX.md` | The guided install, written for Codex to run with you |
+| `SETUP.md` | The guided install, written for the agent to run with you |
+| `AGENTS.md`, `CLAUDE.md` | Tell whichever agent opens this folder to read `SETUP.md` |
 | `install.sh` | Idempotent installer: container, config, rule, wake-up line |
 | `docker-compose.yml` | Kokoro-FastAPI, CPU image, loopback only |
 | `speak.py` | Extract, synthesize, play. Also hello, audition, choose, wake-up, and the Codex notify entry point |
-| `AGENTS.md.snippet` | The writing rule that produces the spoken summary |
-| `codex-config.snippet.toml` | The one notify line for `~/.codex/config.toml` |
+| `AGENTS.md.snippet` | The writing rule, appended to `~/.codex/AGENTS.md` and/or `~/.claude/CLAUDE.md` |
+| `codex-config.snippet.toml` | The Codex hook: one notify line for `~/.codex/config.toml` |
+| `claude-settings.snippet.json` | The Claude Code hook: one Stop entry for `~/.claude/settings.json` |
 | `remote/` | Add-on: hear the voice on a different device over SSH |
 
 ## Add-ons
 
-Offered by Codex at the end of the install, all optional and reversible: change the voice later, adjust speed, use the GPU, or hear the voice on another device. Details in the last section of `SETUP-FOR-CODEX.md`.
+Offered by the agent at the end of the install, all optional and reversible: change the voice later, adjust speed, use the GPU, or hear the voice on another device. Details in the last section of `SETUP.md`.
 
 ## Requirements
 
@@ -57,7 +59,7 @@ Offered by Codex at the end of the install, all optional and reversible: change 
 
 ## Uninstall
 
-`docker compose down` in this folder, delete the `notify` line from `~/.codex/config.toml`, remove the section that starts with "Voice summary marker" from `~/.codex/AGENTS.md`, and delete `~/.talking-computer/`.
+`docker compose down` in this folder, delete the `notify` line from `~/.codex/config.toml` and/or the Stop hook from `~/.claude/settings.json`, remove the section that starts with "Voice summary marker" from `~/.codex/AGENTS.md` and/or `~/.claude/CLAUDE.md`, and delete `~/.talking-computer/`.
 
 ## Credits
 

@@ -5,6 +5,7 @@ Three ways to run it (stdlib only, no pip installs):
 
   speak.py --text "hello there"        synthesize with Kokoro and play it now
   speak.py --notify '<json>'           Codex `notify` entry point (JSON as argv or stdin)
+  speak.py --stop-hook                 Claude Code `Stop` hook entry point (JSON on stdin)
   speak.py --listen                    tiny HTTP listener on 127.0.0.1:9876; POST raw
                                        text to it and this machine speaks. Use when the
                                        agent runs on a remote box: ssh -R 9876:127.0.0.1:9876
@@ -70,7 +71,7 @@ LISTEN_PORT = int(os.environ.get("SPEAK_LISTEN_PORT", "9876"))
 
 # The experience lines. Keep them short; a voice you can't interrupt gets old fast.
 HELLO = ("Hello. I'm the voice your computer is about to get. "
-         "If you can hear me, tell Codex yes.")
+         "If you can hear me, say yes.")
 AUDITION_SENTENCE = ("The build finished, two tests failed, "
                      "and I've got a fix ready when you are.")
 AUDITION_VOICES = [
@@ -212,6 +213,62 @@ def handle_notify(raw: str) -> None:
         speak(line)
 
 
+def _last_assistant_text(transcript_path: str) -> str:
+    """Claude Code transcript is JSONL; return the text of the last assistant entry."""
+    last = ""
+    try:
+        with open(transcript_path, encoding="utf-8") as fh:
+            for raw in fh:
+                try:
+                    entry = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                msg = entry.get("message") or {}
+                if msg.get("role") != "assistant":
+                    continue
+                parts = [c.get("text", "") for c in (msg.get("content") or []) if c.get("type") == "text"]
+                if parts:
+                    last = "\n".join(parts)
+    except OSError:
+        return ""
+    return last
+
+
+def handle_stop_hook(raw: str) -> None:
+    """Claude Code Stop hook payload: {"transcript_path": "...", "hook_event_name": "Stop", ...}
+    The final text block can land in the transcript slightly after the hook fires, so poll briefly."""
+    try:
+        payload = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        log("stop-hook: payload was not JSON")
+        return
+    path = payload.get("transcript_path", "")
+    if not path:
+        return
+    try:
+        last_spoken = LAST_PATH.read_text().strip() if LAST_PATH.exists() else ""
+    except OSError:
+        last_spoken = ""
+    line = ""
+    for _ in range(30):
+        candidate = extract_speak_line(_last_assistant_text(path))
+        if candidate and candidate != last_spoken:
+            line = candidate
+            break
+        time.sleep(0.2)
+    if not line:
+        return
+    try:
+        LAST_PATH.parent.mkdir(parents=True, exist_ok=True)
+        LAST_PATH.write_text(line)
+    except OSError:
+        pass
+    if REMOTE_URL:
+        post_remote(line)
+    else:
+        speak(line)
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802
         length = int(self.headers.get("Content-Length", "0"))
@@ -260,6 +317,14 @@ def main(argv: list[str]) -> int:
                 return 0
             os.setsid()
         handle_notify(raw)
+        return 0
+    if mode == "--stop-hook":
+        raw = sys.stdin.read()
+        if os.environ.get("SPEAK_FOREGROUND") != "1" and hasattr(os, "fork"):
+            if os.fork() != 0:
+                return 0          # return immediately so the agent isn't blocked
+            os.setsid()
+        handle_stop_hook(raw)
         return 0
     if mode == "--listen":
         listen()
