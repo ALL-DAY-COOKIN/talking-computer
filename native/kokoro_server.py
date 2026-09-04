@@ -16,10 +16,41 @@ import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import shutil
+import tempfile
+
+import espeakng_loader
 import numpy as np
-from kokoro_onnx import Kokoro
 
 HERE = Path(__file__).resolve().parent
+
+
+def _short_espeak_data() -> None:
+    """espeak-ng keeps its data path in a ~160-byte buffer. If the bundled data sits at a
+    longer path (deep venvs do this) it silently falls back to a compiled-in path and
+    aborts the process on first use. Copy the ~19 MB data dir somewhere short instead.
+    A symlink is not enough: phonemizer resolves it back to the long path."""
+    real = espeakng_loader.get_data_path()
+    if len(real) < 140:
+        return
+    candidates = [
+        os.environ.get("KOKORO_ESPEAK_DATA", ""),
+        str(Path.home() / ".talking-computer" / "espeak-ng-data"),
+        str(Path(tempfile.gettempdir()) / "tc-espeak-ng-data"),
+    ]
+    for dest in candidates:
+        if dest and len(dest) < 140:
+            if not (Path(dest) / "phontab").exists():
+                Path(dest).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(real, dest, dirs_exist_ok=True)
+            espeakng_loader.get_data_path = lambda d=dest: d  # type: ignore[assignment]
+            print(f"espeak data path too long ({len(real)} chars); using copy at {dest}", flush=True)
+            return
+    print(f"WARNING: espeak data path is {len(real)} chars and no short location was writable", flush=True)
+
+
+_short_espeak_data()
+from kokoro_onnx import Kokoro  # noqa: E402  (must come after the path fix)
 MODEL = os.environ.get("KOKORO_MODEL", str(HERE / "models" / "kokoro-v1.0.onnx"))
 VOICES = os.environ.get("KOKORO_VOICES", str(HERE / "models" / "voices-v1.0.bin"))
 PORT = int(os.environ.get("KOKORO_PORT", "8880"))
