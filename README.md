@@ -7,7 +7,7 @@ Talking Computer makes Codex or Claude Code end every reply with a short spoken 
 ## Install
 
 ```
-git clone https://github.com/trheard/talking-computer && cd talking-computer
+git clone https://github.com/ALL-DAY-COOKIN/talking-computer && cd talking-computer
 codex "Install this."        # or:  claude "Install this."
 ```
 
