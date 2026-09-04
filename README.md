@@ -55,7 +55,7 @@ Offered by the agent at the end of the install, all optional and reversible: cha
 
 ## Requirements
 
-- Docker, preferred. The installer offers to install it if it's missing. No Docker and don't want it? `./tc engine --native` runs the same engine straight from source (faster on Apple Silicon).
+- Docker, preferred. The installer offers to install it if it's missing. No Docker and don't want it? `./tc engine --native` runs the same voice in an isolated Python instead (no compilers, about half a gigabyte).
 - On Windows use WSL2.
 - Python 3.9 or newer, no packages to install
 - A way to play sound: macOS has `afplay` built in; Linux needs `paplay`, `aplay`, or `ffplay`

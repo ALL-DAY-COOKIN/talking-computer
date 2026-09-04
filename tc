@@ -51,7 +51,7 @@ have_codex()  { command -v codex  >/dev/null 2>&1 || [[ -d "$CODEX_DIR" ]]; }
 have_claude() { command -v claude >/dev/null 2>&1 || [[ -d "$CLAUDE_DIR" ]]; }
 engine_kind() {
   if docker_installed && docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx talking-computer-kokoro; then echo docker
-  elif [[ -f "$TC_HOME/kokoro.pid" ]] || [[ -d "$TC_HOME/kokoro-fastapi/.venv" ]]; then echo native
+  elif [[ -f "$TC_HOME/kokoro.pid" ]] || [[ -d "$TC_HOME/engine/.venv" ]]; then echo native
   else echo none; fi
 }
 hello() {
@@ -83,10 +83,10 @@ cmd_preflight() {
   else
     warn "docker: not installed"
     if [[ $OS == Darwin ]] && (( $(mac_major) < 14 )); then
-      sayto "Docker Desktop needs macOS 14 or newer and this Mac is on $(sw_vers -productVersion). No problem: the voice engine can run natively, no Docker, about 5 minutes and 2 GB of disk. On Apple Silicon it uses the Mac's GPU."
+      sayto "Docker Desktop needs macOS 14 or newer and this Mac is on $(sw_vers -productVersion). No problem: the voice engine can run natively, no Docker, a few minutes and about half a gigabyte of disk."
       next "./tc engine --native"
     else
-      sayto "Docker isn't installed. Two options. A: I install Docker for you, a free app that runs programs in sealed boxes, about 600 MB, you accept its terms once when it opens. B: skip Docker and run the voice engine natively from source in its own isolated Python, about 5 minutes and 2 GB. Which do you prefer?"
+      sayto "Docker isn't installed. Two options. A: I install Docker for you, a free app that runs programs in sealed boxes, about 600 MB, you accept its terms once when it opens. B: skip Docker and run the voice engine natively in its own isolated Python, a few minutes and about half a gigabyte. Which do you prefer?"
       next "A: ./tc engine --install-docker      B: ./tc engine --native"
     fi
   fi
@@ -113,7 +113,7 @@ cmd_engine() {
   local want=""; for a in "$@"; do case $a in --install-docker) want=install;; --native) want=native;; esac; done
   if kokoro_up; then ok "voice engine already running on :$PORT"; hello; return 0; fi
   if [[ $want == native ]] || { [[ -z $want ]] && [[ $(engine_kind) == native ]]; }; then
-    sayto "Installing the voice engine natively: its own isolated Python 3.12 environment, PyTorch, and the 330 MB Kokoro model. About five minutes. No Docker, nothing installed into your system Python."
+    sayto "Installing the voice engine natively: an isolated Python environment, about 150 MB of prebuilt packages, and the 340 MB Kokoro model. A few minutes depending on your connection. No Docker, no compilers, nothing installed into your system Python."
     bash "$KIT_DIR/native/kokoro-native.sh" install || { fail "native install failed. See $TC_HOME/kokoro.log"; return 1; }
     bash "$KIT_DIR/native/kokoro-native.sh" start   || { fail "native engine did not start. See $TC_HOME/kokoro.log"; return 1; }
     bash "$KIT_DIR/native/kokoro-native.sh" autostart >/dev/null 2>&1 && ok "engine will start automatically at login" || warn "autostart not installed; after a reboot run: bash $KIT_DIR/native/kokoro-native.sh start"
