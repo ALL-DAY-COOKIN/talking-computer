@@ -8,6 +8,9 @@
 #   4. installs the SPEAK rule into ~/.codex/AGENTS.md and/or ~/.claude/CLAUDE.md
 #   5. the chosen voice says setup is done
 # Flags: --agent codex|claude|both   which agent to wire (default: whichever is installed)
+#        --engine docker|native      voice engine (default: docker if available, else native)
+#        --install-docker            install Docker Desktop / Docker Engine first (the guide
+#                                    asks the user's permission before passing this)
 #        --hook-only                 wire the hook only; no Docker, no rule, no sound (guide phase 3)
 #        --rule-only                 append the rule only; no Docker, no hook, no sound (guide phase 4)
 #        (two-machine setups: see remote/README.md)
@@ -17,10 +20,12 @@ set -euo pipefail
 KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-REMOTE=0; DO_NOTIFY=1; DO_CONTRACT=1; DO_DOCKER=1; DO_TEST=1; AGENT=""
+REMOTE=0; DO_NOTIFY=1; DO_CONTRACT=1; DO_DOCKER=1; DO_TEST=1; AGENT=""; ENGINE=""; INSTALL_DOCKER=0
 prev=""
 for a in "$@"; do case "$a" in
   --remote) REMOTE=1;;
+  --install-docker) INSTALL_DOCKER=1;;
+  docker|native) [[ "$prev" == "--engine" ]] && ENGINE="$a";;
   --hook-only|--no-contract) DO_CONTRACT=0; DO_DOCKER=0; DO_TEST=0;;
   --rule-only|--contract-only) DO_NOTIFY=0; DO_DOCKER=0; DO_TEST=0;;
   codex|claude|both) [[ "$prev" == "--agent" ]] && AGENT="$a";;
@@ -41,39 +46,77 @@ REMOTE_URL="http://127.0.0.1:${SPEAK_LISTEN_PORT:-9876}"
 say() { printf '\033[0;32m[talking-computer]\033[0m %s\n' "$*"; }
 die() { printf '\033[0;31m[talking-computer] %s\033[0m\n' "$*" >&2; exit 1; }
 
-# 1. prerequisites
+docker_ready() { command -v docker >/dev/null && docker info >/dev/null 2>&1; }
+mac_major() { [[ "$(uname -s)" == "Darwin" ]] && sw_vers -productVersion | cut -d. -f1 || echo 0; }
+
+install_docker() {
+  # Called only when the user has said yes. Installs, then waits for the daemon.
+  case "$(uname -s)" in
+    Darwin)
+      if (( $(mac_major) < 14 )); then say "this Mac is on macOS $(sw_vers -productVersion); Docker Desktop needs 14 or newer. Using the native engine instead."; return 1; fi
+      command -v brew >/dev/null || { say "Homebrew not found. Install Docker Desktop from https://docs.docker.com/desktop/setup/install/mac-install/ and rerun, or use the native engine."; return 1; }
+      say "what: brew install --cask docker   why: this is Docker Desktop, the app that runs the voice container"
+      brew install --cask docker >/dev/null || return 1
+      say "opening Docker Desktop. It will ask you to accept its terms the first time; the install continues once it's running."
+      open -a Docker || true
+      ;;
+    Linux)
+      if command -v apt-get >/dev/null || command -v dnf >/dev/null; then
+        say "Docker Engine needs administrator rights. Run these in your own terminal, then rerun install.sh:"
+        say "   curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker \$USER && newgrp docker"
+        return 1
+      fi
+      say "unsupported Linux flavor for automatic install; see https://docs.docker.com/engine/install/"; return 1
+      ;;
+    *) say "on Windows, install Docker Desktop with WSL2 from https://docs.docker.com/desktop/setup/install/windows-install/"; return 1;;
+  esac
+  for _ in $(seq 1 90); do docker_ready && return 0; sleep 2; done
+  say "Docker installed but the daemon isn't answering yet. Open Docker Desktop, then rerun install.sh."; return 1
+}
+
+# 1. prerequisites + engine choice
 if [[ $DO_DOCKER -eq 0 ]]; then
   :
 elif [[ $REMOTE -eq 1 ]]; then
   command -v python3 >/dev/null || die "python3 not found."
   say "remote mode: this machine forwards speech to $REMOTE_URL (ssh tunnel to the laptop)"
 else
-command -v docker >/dev/null || die "docker not found. Install Docker Desktop (Mac/Windows) or docker engine (Linux) and rerun."
-docker compose version >/dev/null 2>&1 || die "'docker compose' v2 plugin missing."
-command -v python3 >/dev/null || die "python3 not found."
-if [[ "$(uname -s)" == "Darwin" ]]; then
-  command -v afplay >/dev/null || die "afplay missing (should ship with macOS)."
-elif [[ "$(uname -s)" == "Linux" ]]; then
-  command -v paplay >/dev/null || command -v aplay >/dev/null || command -v ffplay >/dev/null \
-    || say "WARNING: no audio player found. Install one: sudo apt install -y pulseaudio-utils   (or alsa-utils / ffmpeg)"
-fi
-say "prerequisites OK"
+  command -v python3 >/dev/null || die "python3 not found."
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    command -v afplay >/dev/null || die "afplay missing (should ship with macOS)."
+  elif [[ "$(uname -s)" == "Linux" ]]; then
+    command -v paplay >/dev/null || command -v aplay >/dev/null || command -v ffplay >/dev/null \
+      || say "WARNING: no audio player found. Install one: sudo apt install -y pulseaudio-utils   (or alsa-utils / ffmpeg)"
+  fi
+  if [[ -z "$ENGINE" ]]; then
+    if docker_ready; then ENGINE=docker
+    elif [[ $INSTALL_DOCKER -eq 1 ]] && install_docker; then ENGINE=docker
+    elif command -v docker >/dev/null && ! docker info >/dev/null 2>&1; then
+      die "Docker is installed but not running. Start Docker Desktop (or: sudo systemctl start docker) and rerun. Or: install.sh --engine native"
+    else ENGINE=native; fi
+  fi
+  if [[ "$ENGINE" == docker ]]; then docker compose version >/dev/null 2>&1 || die "'docker compose' v2 plugin missing."; fi
+  say "prerequisites OK   engine: $ENGINE"
 fi
 say "agents to wire: $AGENT"
 
-# 2. Kokoro container
+# 2. voice engine
 if [[ $REMOTE -eq 0 && $DO_DOCKER -eq 1 ]]; then
-say "what: starting the Kokoro text-to-speech container   why: it turns the summary text into audio, locally, on :8880"
-( cd "$KIT_DIR" && docker compose up -d )
-say "waiting for Kokoro on :8880 (first start downloads the model, can take a minute)..."
-for _ in $(seq 1 90); do
-  if curl -fsS http://127.0.0.1:8880/v1/models >/dev/null 2>&1; then break; fi
-  sleep 2
-done
-curl -fsS http://127.0.0.1:8880/v1/models >/dev/null 2>&1 || die "Kokoro did not come up. Check: docker logs talking-computer-kokoro"
-say "Kokoro is up"
-say "first sound: the voice introduces itself (speakers on?)"
-python3 "$KIT_DIR/speak.py" --hello
+  if [[ "$ENGINE" == docker ]]; then
+    say "what: starting the Kokoro text-to-speech container   why: it turns the summary text into audio, locally, on :8880"
+    ( cd "$KIT_DIR" && docker compose up -d )
+    say "waiting for Kokoro on :8880 (first start downloads the image, can take a few minutes)..."
+    for _ in $(seq 1 90); do curl -fsS http://127.0.0.1:8880/v1/models >/dev/null 2>&1 && break; sleep 2; done
+    curl -fsS http://127.0.0.1:8880/v1/models >/dev/null 2>&1 || die "Kokoro did not come up. Check: docker logs talking-computer-kokoro"
+  else
+    say "what: installing the Kokoro voice engine natively (no Docker)   why: same engine, runs straight from source with an isolated Python; on Apple Silicon it uses the Mac GPU"
+    bash "$KIT_DIR/native/kokoro-native.sh" install
+    bash "$KIT_DIR/native/kokoro-native.sh" start
+    bash "$KIT_DIR/native/kokoro-native.sh" autostart >/dev/null 2>&1 || say "note: autostart not installed; run native/kokoro-native.sh start after a reboot"
+  fi
+  say "Kokoro is up"
+  say "first sound: the voice introduces itself (speakers on?)"
+  python3 "$KIT_DIR/speak.py" --hello
 fi
 
 # 3. Codex notify hook

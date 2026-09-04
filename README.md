@@ -44,6 +44,7 @@ agent finishes a reply
 | `AGENTS.md.snippet` | The writing rule, appended to `~/.codex/AGENTS.md` and/or `~/.claude/CLAUDE.md` |
 | `codex-config.snippet.toml` | The Codex hook: one notify line for `~/.codex/config.toml` |
 | `claude-settings.snippet.json` | The Claude Code hook: one Stop entry for `~/.claude/settings.json` |
+| `native/` | The voice engine without Docker: `kokoro-native.sh install|start|stop|autostart` |
 | `remote/` | Add-on: hear the voice on a different device over SSH |
 
 ## Add-ons
@@ -52,7 +53,8 @@ Offered by the agent at the end of the install, all optional and reversible: cha
 
 ## Requirements
 
-- Docker (Desktop on macOS, engine on Linux; on Windows use WSL2 with Docker Desktop's WSL integration)
+- Docker, preferred. The installer offers to install it if it's missing. No Docker and don't want it? `install.sh --engine native` runs the same engine straight from source (faster on Apple Silicon).
+- On Windows use WSL2.
 - Python 3.9 or newer, no packages to install
 - A way to play sound: macOS has `afplay` built in; Linux needs `paplay`, `aplay`, or `ffplay`
 - About 5 GB of disk for the image and 1.5 GB of RAM while it runs

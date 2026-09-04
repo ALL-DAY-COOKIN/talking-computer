@@ -9,17 +9,22 @@ Rules for this install:
 - Every proof is something the user can read on screen or hear from the speakers.
 - If a step fails, say what failed, what you think caused it, and what you are going to try, before trying it.
 - Everything here stays on this laptop. Nothing is sent anywhere. Say that early.
+- **Sandbox rule.** Agent sandboxes often block Docker's control socket and other system access. If a command fails with a permission, socket, or "operation not permitted" error: try once to run it outside the sandbox if your tool offers that. If that is not available or also fails, stop. Do not investigate socket paths or request more grants. Hand the exact command to the user to paste into their own Terminal, say in one line what it does, wait for "done", then verify with a read-only command and continue. This is normal, not a failure.
 
 ## Before anything: the pre-flight
 
-Tell the user, in one short paragraph, what the finished result is: every reply you give will end with a two-to-four sentence spoken summary, played through the laptop speakers by a small text-to-speech program running locally. Then list exactly what will change on the machine:
+Open with one line, in your own words, along the lines of: "Basically, I'm going to give your computer a voice. Ready?" Then, in one short paragraph, what the finished result is: every reply you give will end with a two-to-four sentence spoken summary, played through the laptop speakers by a small text-to-speech program running locally. Then list exactly what will change on the machine:
 
-1. A Docker container named `talking-computer-kokoro` will run in the background, using about 1.5 GB of memory. It only listens on this laptop.
+1. The voice engine, Kokoro, will run in the background and only listen on this laptop. Normally that is a Docker container named `talking-computer-kokoro`, about 1.5 GB of memory and 5 GB of disk. If Docker is not available, see "No Docker?" below.
 2. A hook will be added so the agent hands each finished reply to a small script. For Codex that is one `notify` line in `~/.codex/config.toml`. For Claude Code it is a `Stop` hook in `~/.claude/settings.json`. If both agents are installed, both get wired.
 3. A writing rule will be appended to the agent's instructions file, `~/.codex/AGENTS.md` for Codex and `~/.claude/CLAUDE.md` for Claude Code, so every reply ends with a block that starts with `===SPEAK===`.
 4. A log folder `~/.talking-computer/` will be created.
 
-Nothing else is touched. Then check the prerequisites and report them in a short list: Docker installed and running (`docker info`), Python 3 present (`python3 --version`), and a way to play sound (macOS has `afplay` built in; Linux needs `paplay`, `aplay`, or `ffplay`). If Docker is not running, ask the user to start Docker Desktop and wait.
+Nothing else is touched. Then check the prerequisites and report them in a short list: Docker installed and running (`docker info`), Python 3 present (`python3 --version`), and a way to play sound (macOS has `afplay` built in; Linux needs `paplay`, `aplay`, or `ffplay`). If Docker is installed but not running, ask the user to start Docker Desktop and wait.
+
+**No Docker?** Two options, and the user picks:
+- **Install Docker for them (default offer).** Explain: "Docker is a free app that runs programs in sealed boxes. I'd like to install it so the voice engine can live in one. It's about a 600 MB download and you'll have to accept its terms once when it opens." If they say yes, phase 1 uses `bash install.sh --install-docker`. On macOS this needs Homebrew and macOS 14 or newer; the installer says so if either is missing. On Linux the installer prints the two commands the user must run themselves because they need administrator rights.
+- **Skip Docker, run the engine natively.** Explain: "Same voice engine, run straight from its source code in its own isolated Python. No Docker at all. On Apple Silicon it uses the Mac's GPU. Takes about five minutes and 2 GB of disk." Phase 1 uses `bash install.sh --engine native`. This is also the automatic fallback when Docker cannot be installed (for example a Mac on macOS 13).
 
 Last thing before phase 1: "Turn your speakers on and set the volume to a normal level. The first thing you'll hear is the voice introducing itself." Ask: go ahead with phase 1?
 
@@ -27,7 +32,9 @@ Last thing before phase 1: "Turn your speakers on and set the volume to a normal
 
 **Explain:** "I'm starting Kokoro, a small open-source text-to-speech model, inside Docker. Docker is a way to run a program in its own sealed box. Kokoro will sit in the background and turn text into audio whenever asked. It only answers on this laptop, on port 8880."
 
-**Do:** from this folder, `docker compose up -d`. The first start downloads the image, about 5 GB, which can take a few minutes. Tell the user that is expected and show the progress.
+**Do:** from this folder, `docker compose up -d`. The first start downloads the image, about 5 GB, which can take a few minutes. Tell the user that is expected and show the progress. **Expect the sandbox rule to apply here:** if the command fails to reach Docker, hand it to the user: "Please open Terminal and run: `cd <this folder> && docker compose up -d` and tell me when it's done." Then verify with the curl below.
+
+If the user chose Docker install or the native engine in pre-flight, run `bash install.sh --install-docker` or `bash install.sh --engine native` instead of the bare compose command; either ends with the hello line, so skip "Prove, part two" below if you already heard it.
 
 **Prove, part one:** `curl -s http://127.0.0.1:8880/v1/models` returns JSON. Say "that's the voice engine answering."
 
