@@ -8,9 +8,11 @@
 #   4. installs the SPEAK rule into ~/.codex/AGENTS.md and/or ~/.claude/CLAUDE.md
 #   5. the chosen voice says setup is done
 # Flags: --agent codex|claude|both   which agent to wire (default: whichever is installed)
-#        --no-contract               do the hook but not the rule file (guide phase 3)
-#        --contract-only             do the rule file only, skip Docker and hook (guide phase 4)
+#        --hook-only                 wire the hook only; no Docker, no rule, no sound (guide phase 3)
+#        --rule-only                 append the rule only; no Docker, no hook, no sound (guide phase 4)
 #        (two-machine setups: see remote/README.md)
+# With no flags it does everything in order and ends with the wake-up line.
+# To pick a voice afterwards: python3 speak.py --audition, then --choose <id> <name>.
 set -euo pipefail
 KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
@@ -19,8 +21,8 @@ REMOTE=0; DO_NOTIFY=1; DO_CONTRACT=1; DO_DOCKER=1; DO_TEST=1; AGENT=""
 prev=""
 for a in "$@"; do case "$a" in
   --remote) REMOTE=1;;
-  --no-contract) DO_CONTRACT=0;;
-  --contract-only) DO_NOTIFY=0; DO_DOCKER=0; DO_TEST=0;;
+  --hook-only|--no-contract) DO_CONTRACT=0; DO_DOCKER=0; DO_TEST=0;;
+  --rule-only|--contract-only) DO_NOTIFY=0; DO_DOCKER=0; DO_TEST=0;;
   codex|claude|both) [[ "$prev" == "--agent" ]] && AGENT="$a";;
 esac; prev="$a"; done
 # detect agents when not told
@@ -157,3 +159,4 @@ else
   python3 "$KIT_DIR/speak.py" --wakeup
 fi
 say "done. Log: ~/.talking-computer/speak.log"
+say "to pick a different voice: python3 $KIT_DIR/speak.py --audition   then: --choose <id> <name>"

@@ -1,10 +1,10 @@
 # Kokoro TTS box — OpenAI-compatible speech endpoint on http://127.0.0.1:8880
 # CPU image works everywhere (Mac, Linux, Windows). ~1 GB RAM, a sentence in ~1 s.
-# For an NVIDIA box, swap the image to ghcr.io/remsky/kokoro-fastapi-gpu:latest
+# For an NVIDIA box, swap the image to ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.1
 # and uncomment the deploy block.
 services:
   kokoro:
-    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.1
     container_name: talking-computer-kokoro
     restart: unless-stopped
     ports:

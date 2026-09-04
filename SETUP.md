@@ -51,7 +51,7 @@ Last thing before phase 1: "Turn your speakers on and set the volume to a normal
 
 **Explain:** "Your coding agent can run a program every time it finishes a reply. I'm adding a hook that points at the script. The script looks for a block at the end of my reply that starts with three equals signs and the word SPEAK, and speaks only that part. If a reply has no such block, nothing happens." Then say where the hook goes for the agent in use: Codex, one `notify` line in `~/.codex/config.toml`; Claude Code, a `Stop` hook entry in `~/.claude/settings.json`.
 
-**Do:** `bash install.sh --no-contract`. It detects which agents are installed and wires each. Show the user what it added: `grep notify ~/.codex/config.toml` and/or `grep -A3 Stop ~/.claude/settings.json`.
+**Do:** `bash install.sh --hook-only`. It detects which agents are installed and wires each, and touches nothing else. Show the user what it added: `grep notify ~/.codex/config.toml` and/or `grep -A3 Stop ~/.claude/settings.json`.
 
 **Prove:** simulate a finished reply without leaving this session. For Codex:
 ```
@@ -70,7 +70,7 @@ The user hears that sentence.
 
 **Explain:** "The last piece is a writing rule. Your agent reads an instructions file at the start of every session: AGENTS.md for Codex, CLAUDE.md for Claude Code. I'm appending a section that says: end every reply with a short spoken summary, two to four sentences, in plain conversational language, no file names or code. It also explains why: so you can be away from the screen and still know what happened. You can read it, it's about a page."
 
-**Do:** `bash install.sh --contract-only`. Then offer to show the section: `tail -60 ~/.codex/AGENTS.md` or `tail -60 ~/.claude/CLAUDE.md`.
+**Do:** `bash install.sh --rule-only`. Then offer to show the section: `tail -60 ~/.codex/AGENTS.md` or `tail -60 ~/.claude/CLAUDE.md`.
 
 **Prove:** `grep -c '===SPEAK===' ~/.codex/AGENTS.md` and/or `grep -c '===SPEAK===' ~/.claude/CLAUDE.md` is at least 1.
 

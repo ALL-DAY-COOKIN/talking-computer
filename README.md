@@ -13,7 +13,7 @@ codex "Install this."        # or:  claude "Install this."
 
 Either agent finds the instructions in this folder and walks you through it in four short phases and explains each one before touching anything. The first thing you hear is the voice introducing itself. Then four voices audition for the job and you pick one and name it. The last thing you hear is that voice saying setup is done. About ten minutes, most of it the one-time image download.
 
-Prefer to do it by hand? `bash install.sh` does the same steps without the conversation.
+Prefer to do it by hand? `bash install.sh` does the same steps without the conversation, then `python3 speak.py --audition` to pick a voice.
 
 ## What you get
 
@@ -52,7 +52,7 @@ Offered by the agent at the end of the install, all optional and reversible: cha
 
 ## Requirements
 
-- Docker (Desktop on macOS or Windows, engine on Linux)
+- Docker (Desktop on macOS, engine on Linux; on Windows use WSL2 with Docker Desktop's WSL integration)
 - Python 3.9 or newer, no packages to install
 - A way to play sound: macOS has `afplay` built in; Linux needs `paplay`, `aplay`, or `ffplay`
 - About 5 GB of disk for the image and 1.5 GB of RAM while it runs
