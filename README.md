@@ -11,9 +11,11 @@ git clone https://github.com/ALL-DAY-COOKIN/talking-computer && cd talking-compu
 codex "Install this."        # or:  claude "Install this."
 ```
 
-Either agent finds the instructions in this folder and walks you through it in four short phases and explains each one before touching anything. The first thing you hear is the voice introducing itself. Then four voices audition for the job and you pick one and name it. The last thing you hear is that voice saying setup is done. About ten minutes, most of it the one-time image download.
+The agent finds the instructions in this folder and walks you through six short phases, explaining each before touching anything. The first thing you hear is the voice introducing itself. Then four voices audition and you pick one and name it. The last thing you hear is that voice saying setup is done. About ten minutes, most of it the one-time download.
 
-Prefer to do it by hand? `bash install.sh` does the same steps without the conversation, then `python3 speak.py --audition` to pick a voice.
+Agent sandboxes usually can't start Docker containers. When that happens the agent hands you one command to paste into your own Terminal, and continues. That's expected.
+
+Prefer to do it by hand? `./tc all` does every phase without the conversation, then `./tc audition` to pick a voice.
 
 ## What you get
 
@@ -36,9 +38,9 @@ agent finishes a reply
 
 | File | Purpose |
 |---|---|
+| `tc` | The one command: `./tc preflight`, `engine`, `audition`, `choose`, `hook`, `rule`, `finish`, `status`, `off`, `on` |
 | `SETUP.md` | The guided install, written for the agent to run with you |
 | `AGENTS.md`, `CLAUDE.md` | Tell whichever agent opens this folder to read `SETUP.md` |
-| `install.sh` | Idempotent installer: container, config, rule, wake-up line |
 | `docker-compose.yml` | Kokoro-FastAPI, CPU image, loopback only |
 | `speak.py` | Extract, synthesize, play. Also hello, audition, choose, wake-up, and the Codex notify entry point |
 | `AGENTS.md.snippet` | The writing rule, appended to `~/.codex/AGENTS.md` and/or `~/.claude/CLAUDE.md` |
@@ -53,7 +55,7 @@ Offered by the agent at the end of the install, all optional and reversible: cha
 
 ## Requirements
 
-- Docker, preferred. The installer offers to install it if it's missing. No Docker and don't want it? `install.sh --engine native` runs the same engine straight from source (faster on Apple Silicon).
+- Docker, preferred. The installer offers to install it if it's missing. No Docker and don't want it? `./tc engine --native` runs the same engine straight from source (faster on Apple Silicon).
 - On Windows use WSL2.
 - Python 3.9 or newer, no packages to install
 - A way to play sound: macOS has `afplay` built in; Linux needs `paplay`, `aplay`, or `ffplay`
@@ -61,7 +63,7 @@ Offered by the agent at the end of the install, all optional and reversible: cha
 
 ## Uninstall
 
-`docker compose down` in this folder, delete the `notify` line from `~/.codex/config.toml` and/or the Stop hook from `~/.claude/settings.json`, remove the section that starts with "Voice summary marker" from `~/.codex/AGENTS.md` and/or `~/.claude/CLAUDE.md`, and delete `~/.talking-computer/`.
+`./tc off` silences it. To remove: `docker compose down` in this folder (or `native/kokoro-native.sh stop`), delete the `notify` line from `~/.codex/config.toml` and/or the Stop hook from `~/.claude/settings.json`, remove the section that starts with "Voice summary marker" from `~/.codex/AGENTS.md` and/or `~/.claude/CLAUDE.md`, and delete `~/.talking-computer/`.
 
 ## Credits
 

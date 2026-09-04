@@ -1,109 +1,65 @@
 # SETUP.md — Talking Computer
 
-You are the coding agent running this install: Codex or Claude Code, the steps are the same and the kit detects which one you are. You are installing this for a person who wants to understand what is happening on their machine, not just see it happen. Your job is to install the Talking Computer in four phases, and at every phase: explain in plain words what you are about to change, ask "go ahead?", do it, prove it with something they can see or hear, then say what they now have and what is still missing.
+You are the coding agent running this install: Codex or Claude Code. You are installing this for a person who wants to understand what is happening on their machine, not just watch it happen.
 
-Rules for this install:
-- Plain words. No jargon without a one-clause explanation the first time.
-- Never run a phase before the user says go.
-- Where a step differs between Codex and Claude Code, both are written out; use yours and do not mention the other unless the user has both.
-- Every proof is something the user can read on screen or hear from the speakers.
-- If a step fails, say what failed, what you think caused it, and what you are going to try, before trying it.
-- Everything here stays on this laptop. Nothing is sent anywhere. Say that early.
-- **Sandbox rule.** Agent sandboxes often block Docker's control socket and other system access. If a command fails with a permission, socket, or "operation not permitted" error: try once to run it outside the sandbox if your tool offers that. If that is not available or also fails, stop. Do not investigate socket paths or request more grants. Hand the exact command to the user to paste into their own Terminal, say in one line what it does, wait for "done", then verify with a read-only command and continue. This is normal, not a failure.
+There is one command, `./tc`, run from this folder, one phase at a time. Each phase prints tagged lines. **Read the tags. Do not improvise commands, do not run Docker yourself, do not investigate permissions.**
 
-## Before anything: the pre-flight
+| Tag | What you do |
+|---|---|
+| `SAY` | Tell the user this, in your own words, before or after the step as it reads. Plain language. |
+| `OK` / `WARN` / `FAIL` | Report it in one line. On `FAIL`, read the `NEXT` line; it always says what to do. |
+| `HANDOFF` | Your sandbox can't do this step. Give the user the exact command to paste into their own Terminal, say in one line what it does, wait for them to say "done", then **rerun the same `./tc` command**. This is normal. |
+| `NEXT` | The one command to run next. Nothing else. |
 
-Open with one line, in your own words, along the lines of: "Basically, I'm going to give your computer a voice. Ready?" Then, in one short paragraph, what the finished result is: every reply you give will end with a two-to-four sentence spoken summary, played through the laptop speakers by a small text-to-speech program running locally. Then list exactly what will change on the machine:
+Rhythm for every phase: say what's about to happen, ask "go ahead?", run the one command, relay what it printed, ask the question it tells you to ask. Never run a phase before the user says go.
 
-1. The voice engine, Kokoro, will run in the background and only listen on this laptop. Normally that is a Docker container named `talking-computer-kokoro`, about 1.5 GB of memory and 5 GB of disk. If Docker is not available, see "No Docker?" below.
-2. A hook will be added so the agent hands each finished reply to a small script. For Codex that is one `notify` line in `~/.codex/config.toml`. For Claude Code it is a `Stop` hook in `~/.claude/settings.json`. If both agents are installed, both get wired.
-3. A writing rule will be appended to the agent's instructions file, `~/.codex/AGENTS.md` for Codex and `~/.claude/CLAUDE.md` for Claude Code, so every reply ends with a block that starts with `===SPEAK===`.
-4. A log folder `~/.talking-computer/` will be created.
+## Phase 0: `./tc preflight`
 
-Nothing else is touched. Then check the prerequisites and report them in a short list: Docker installed and running (`docker info`), Python 3 present (`python3 --version`), and a way to play sound (macOS has `afplay` built in; Linux needs `paplay`, `aplay`, or `ffplay`). If Docker is installed but not running, ask the user to start Docker Desktop and wait.
+Run it first. It opens with the line to say ("Basically, I'm going to give your computer a voice"), lists the four things that will change on the machine, checks Python, audio, disk and Docker, and prints exactly one `NEXT`.
 
-**No Docker?** Two options, and the user picks:
-- **Install Docker for them (default offer).** Explain: "Docker is a free app that runs programs in sealed boxes. I'd like to install it so the voice engine can live in one. It's about a 600 MB download and you'll have to accept its terms once when it opens." If they say yes, phase 1 uses `bash install.sh --install-docker`. On macOS this needs Homebrew and macOS 14 or newer; the installer says so if either is missing. On Linux the installer prints the two commands the user must run themselves because they need administrator rights.
-- **Skip Docker, run the engine natively.** Explain: "Same voice engine, run straight from its source code in its own isolated Python. No Docker at all. On Apple Silicon it uses the Mac's GPU. Takes about five minutes and 2 GB of disk." Phase 1 uses `bash install.sh --engine native`. This is also the automatic fallback when Docker cannot be installed (for example a Mac on macOS 13).
+If Docker isn't installed it asks the user to choose: **A**, install Docker for them (`./tc engine --install-docker`), or **B**, run the voice engine natively with no Docker (`./tc engine --native`). Relay the two options as written and run the one they pick. On a Mac older than macOS 14 it picks B for them.
 
-Last thing before phase 1: "Turn your speakers on and set the volume to a normal level. The first thing you'll hear is the voice introducing itself." Ask: go ahead with phase 1?
+## Phase 1: `./tc engine`
 
-## Phase 1: the voice engine
+Starts the voice engine and plays the hello line: "Hello. I'm the voice your computer is about to get. If you can hear me, say yes."
 
-**Explain:** "I'm starting Kokoro, a small open-source text-to-speech model, inside Docker. Docker is a way to run a program in its own sealed box. Kokoro will sit in the background and turn text into audio whenever asked. It only answers on this laptop, on port 8880."
+Before running it, say: "Speakers on, volume normal. The first thing you'll hear is the voice introducing itself. The first start downloads a few gigabytes, so it can take a few minutes."
 
-**Do:** from this folder, `docker compose up -d`. The first start downloads the image, about 5 GB, which can take a few minutes. Tell the user that is expected and show the progress. **Expect the sandbox rule to apply here:** if the command fails to reach Docker, hand it to the user: "Please open Terminal and run: `cd <this folder> && docker compose up -d` and tell me when it's done." Then verify with the curl below.
+- The first download can take several minutes. That is expected; say so.
+- A `HANDOFF` here is common: agent sandboxes usually can't reach Docker. Hand the command over, wait for "done", rerun `./tc engine`. It will find the engine running and play the hello.
+- **Do not continue until the user says they heard the hello.** If they didn't: `./tc sound-check`.
 
-If the user chose Docker install or the native engine in pre-flight, run `bash install.sh --install-docker` or `bash install.sh --engine native` instead of the bare compose command; either ends with the hello line, so skip "Prove, part two" below if you already heard it.
+## Phase 2: `./tc audition` then `./tc choose <voice> [name]`
 
-**Prove, part one:** `curl -s http://127.0.0.1:8880/v1/models` returns JSON. Say "that's the voice engine answering."
+Four voices read the same sentence. Ask which one they want and whether to name it. Then `./tc choose bm_george George` (their pick, their name). It confirms in the chosen voice. Ask "is that the one?" If not, choose again.
 
-**Prove, part two, the first sound:** `python3 speak.py --hello`. The voice says: "Hello. I'm the voice your computer is about to get. If you can hear me, say yes." Ask the user if they heard it. If not, this is where you fix sound, not later: check volume and output device, and check `~/.talking-computer/speak.log` (on Linux the usual cause is no audio player installed). Do not move on until they say yes.
+## Phase 3: `./tc hook`
 
-**Now they have:** a voice engine running, and they have heard it. **Still missing:** it's the default voice, and nothing speaks on its own yet.
+Connects the agent to the voice and immediately proves it: a simulated finished reply is spoken aloud. Before running, say: "Now I connect myself to the voice. For Codex that's one line in my config; for Claude Code it's a Stop hook. Then you'll hear a test." Ask "did you hear that?"
 
-## Phase 2: the audition
+## Phase 4: `./tc rule`
 
-**Explain:** "Kokoro has about fifty voices. I'll play four of them reading the same sentence, the kind of sentence you'll actually hear from me later. Pick the one you want to live with. You can give it a name too; that name will show up when it introduces itself."
+Appends the writing rule to the agent's instructions file. Before running, say: "Last piece: a one-page rule that tells me to end every reply with a short spoken summary, plain language, no file names or code. You can read it afterwards." Offer to show it: `tail -60 ~/.codex/AGENTS.md` or `tail -60 ~/.claude/CLAUDE.md`.
 
-**Do:** `python3 speak.py --audition`. It prints a numbered list and plays voice 1 through 4, each saying "Voice N. The build finished, two tests failed, and I've got a fix ready when you are." Offer to replay any of them: `python3 speak.py --text "..." ` with `SPEAK_VOICE=<id>` in front.
+## Phase 5: `./tc finish`
 
-**Choose:** `python3 speak.py --choose <voice id> <name>`, for example `--choose bm_george George`. If they don't want a name, leave it off; the voice's own nickname is used. The choice is saved in `~/.talking-computer/config.json` and becomes the default for everything after this.
+Prints the wrap-up facts for you to relay, plays the wake-up line in the chosen voice ("Setup is done. I'm George. From now on…"), and lists the add-ons. Relay the add-ons as a short menu and ask if they want any now. Then tell the user to start a **new session** and say hello; this session started before the rule existed, so it won't speak here.
 
-**Prove:** `python3 speak.py --text "From now on, this is what I sound like."` in the chosen voice. Ask if that's the one.
+End your own wrap-up reply with a `===SPEAK===` block, as a preview of what every reply will sound like.
 
-**Now they have:** their voice. **Still missing:** the agent doesn't know to use it.
+## If something goes wrong
 
-## Phase 3: connecting the agent to the voice
+- Read the `FAIL` and `NEXT` lines; they are specific.
+- `./tc status` shows engine, hooks, rule, and voice in six lines.
+- `./tc sound-check` replays the hello and shows the log.
+- Never loop on permissions. One try, then `HANDOFF` to the user.
 
-**Explain:** "Your coding agent can run a program every time it finishes a reply. I'm adding a hook that points at the script. The script looks for a block at the end of my reply that starts with three equals signs and the word SPEAK, and speaks only that part. If a reply has no such block, nothing happens." Then say where the hook goes for the agent in use: Codex, one `notify` line in `~/.codex/config.toml`; Claude Code, a `Stop` hook entry in `~/.claude/settings.json`.
+## Add-ons (only after finish)
 
-**Do:** `bash install.sh --hook-only`. It detects which agents are installed and wires each, and touches nothing else. Show the user what it added: `grep notify ~/.codex/config.toml` and/or `grep -A3 Stop ~/.claude/settings.json`.
-
-**Prove:** simulate a finished reply without leaving this session. For Codex:
-```
-SPEAK_FOREGROUND=1 python3 speak.py --notify '{"type":"agent-turn-complete","last-assistant-message":"Screen text here.\n\n===SPEAK=== The hook between the agent and the voice is connected, so every reply can now be spoken."}'
-```
-For Claude Code, write a one-line fake transcript and feed it to the hook:
-```
-printf '%s\n' '{"message":{"role":"assistant","content":[{"type":"text","text":"Screen text.\n\n===SPEAK=== The hook between the agent and the voice is connected, so every reply can now be spoken."}]}}' > /tmp/tc-test.jsonl
-echo '{"transcript_path":"/tmp/tc-test.jsonl"}' | SPEAK_FOREGROUND=1 python3 speak.py --stop-hook
-```
-The user hears that sentence.
-
-**Now they have:** the plumbing from the agent to the speakers. **Still missing:** the agent hasn't been told to write the spoken block.
-
-## Phase 4: teaching the agent to write the spoken summary
-
-**Explain:** "The last piece is a writing rule. Your agent reads an instructions file at the start of every session: AGENTS.md for Codex, CLAUDE.md for Claude Code. I'm appending a section that says: end every reply with a short spoken summary, two to four sentences, in plain conversational language, no file names or code. It also explains why: so you can be away from the screen and still know what happened. You can read it, it's about a page."
-
-**Do:** `bash install.sh --rule-only`. Then offer to show the section: `tail -60 ~/.codex/AGENTS.md` or `tail -60 ~/.claude/CLAUDE.md`.
-
-**Prove:** `grep -c '===SPEAK===' ~/.codex/AGENTS.md` and/or `grep -c '===SPEAK===' ~/.claude/CLAUDE.md` is at least 1.
-
-**Now they have:** everything. **Still missing:** this session started before the rule existed, so it does not apply here. The next new session will.
-
-## Wrap-up
-
-Tell the user, in plain words:
-- The four things now on the machine, in one line each.
-- How to turn it off: `docker compose down` in this folder stops the voice; removing the hook (the notify line in `config.toml`, or the Stop entry in `settings.json`) disconnects the agent; deleting the SPEAK section from the instructions file stops the summaries.
-- Where to look if it goes quiet: `~/.talking-computer/speak.log`.
-- That they need to start a fresh session of the agent, and the first reply there should end with a spoken summary they can hear.
-
-Then the wake-up: `python3 speak.py --wakeup`. The chosen voice says "Setup is done. I'm <name>. From now on, every time your agent finishes, I'll tell you what happened. Go start a new session and say hello." Let that be the last sound of the install.
-
-Then present the options below as a menu and ask if they want any of them now. End your wrap-up reply with a `===SPEAK===` block yourself, as a preview of what every reply will sound like.
-
-## Options and add-ons (present after the install, not before)
-
-Offer these as a short list. Each is optional and reversible.
-
-| Option | What it does | How |
-|---|---|---|
-| **Change the voice later** | Any of Kokoro's ~50 voices, not just the four from the audition. | List: `curl -s http://127.0.0.1:8880/v1/audio/voices`. Sample: `SPEAK_VOICE=<id> python3 speak.py --text "..."`. Keep: `python3 speak.py --choose <id> <name>`. |
-| **Faster or slower** | Speech rate. | Edit `"speed"` in `~/.talking-computer/config.json`, e.g. 1.15. |
-| **Hear it on another device** | The agent runs on this laptop but the voice plays on a different machine, or the reverse: the agent runs on a server and this laptop does the speaking. Uses an SSH tunnel. | Read `remote/README.md` and follow it. Only offer if the user actually works across two machines. |
-| **The other agent too** | Use both Codex and Claude Code? Wire the one that was not detected. | `bash install.sh --agent both`. |
-| **Use the GPU** | On a laptop with an NVIDIA card, Kokoro runs faster on it. Not needed; the CPU version answers in about a second. | Swap the image tag in `docker-compose.yml` to `-gpu` and uncomment the deploy block. |
-| **Turn it off temporarily** | Keep everything installed but silent. | `docker compose stop` in this folder. `docker compose start` brings it back. |
+| Option | How |
+|---|---|
+| Change the voice later | `./tc audition`, then `./tc choose <id> <name>` |
+| Faster or slower | edit `"speed"` in `~/.talking-computer/config.json`, e.g. 1.15 |
+| Hear it on another device over SSH | `remote/README.md` |
+| Wire the other agent too | `./tc hook --agent both`, then `./tc rule` |
+| Turn it off / on | `./tc off`, `./tc on` |

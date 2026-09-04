@@ -1,0 +1,290 @@
+#!/usr/bin/env bash
+# tc — Talking Computer. One command per phase. Run from anywhere: bash /path/to/talking-computer/tc <phase>
+#
+#   ./tc preflight                 what's on this machine, what will change, what to run next
+#   ./tc engine [--install-docker | --native]
+#                                  start the voice engine and play the hello line
+#   ./tc audition                  four voices read the same sentence
+#   ./tc choose <voice> [name]     keep one, hear it confirm
+#   ./tc hook [--agent codex|claude|both] [--remote]
+#                                  connect the agent(s) to the voice, then prove it out loud
+#   ./tc rule                      append the spoken-summary rule to the agent's instructions file
+#   ./tc finish                    wrap-up facts, the wake-up line, the add-ons menu
+#   ./tc status | off | on | sound-check | all
+#
+# Output lines start with a tag. Agents: read the tags, don't guess.
+#   OK / WARN / FAIL   what happened
+#   SAY                tell the user this, in your own words
+#   HANDOFF            the user must paste this exact command into their own Terminal; wait for "done", then rerun the same ./tc command
+#   NEXT               the one command to run next
+set -uo pipefail
+KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TC_HOME="${TC_HOME:-$HOME/.talking-computer}"
+CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
+CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+PORT="${KOKORO_PORT:-8880}"
+KOKORO="http://127.0.0.1:$PORT"
+SPEAK="python3 $KIT_DIR/speak.py"
+OS="$(uname -s)"
+mkdir -p "$TC_HOME"
+
+ok()      { printf 'OK       %s\n' "$*"; }
+warn()    { printf 'WARN     %s\n' "$*"; }
+fail()    { printf 'FAIL     %s\n' "$*"; }
+sayto()   { printf 'SAY      %s\n' "$*"; }
+handoff() { printf 'HANDOFF  %s\n' "$*"; }
+next()    { printf 'NEXT     %s\n' "$*"; }
+
+kokoro_up()        { curl -fsS -m 3 "$KOKORO/v1/models" >/dev/null 2>&1; }
+docker_installed() { command -v docker >/dev/null 2>&1; }
+docker_running()   { docker_installed && docker info >/dev/null 2>&1; }
+docker_socket_exists() { [[ -S "$HOME/.docker/run/docker.sock" || -S /var/run/docker.sock ]]; }
+mac_major()        { [[ "$OS" == Darwin ]] && sw_vers -productVersion | cut -d. -f1 || echo 0; }
+audio_player() {
+  case "$OS" in
+    Darwin) command -v afplay >/dev/null && echo afplay;;
+    Linux)  for p in paplay aplay ffplay; do command -v $p >/dev/null && { echo $p; return; }; done;;
+    *) echo powershell;;
+  esac
+}
+have_codex()  { command -v codex  >/dev/null 2>&1 || [[ -d "$CODEX_DIR" ]]; }
+have_claude() { command -v claude >/dev/null 2>&1 || [[ -d "$CLAUDE_DIR" ]]; }
+engine_kind() {
+  if docker_installed && docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx talking-computer-kokoro; then echo docker
+  elif [[ -f "$TC_HOME/kokoro.pid" ]] || [[ -d "$TC_HOME/kokoro-fastapi/.venv" ]]; then echo native
+  else echo none; fi
+}
+hello() {
+  sayto "Speakers on? Here comes the first sound."
+  $SPEAK --hello
+  sayto "The voice just said: \"Hello. I'm the voice your computer is about to get. If you can hear me, say yes.\" Ask the user if they heard it. Do not continue until they say yes."
+  next "if they heard it: ./tc audition      if not: ./tc sound-check"
+}
+
+# ---------------------------------------------------------------- preflight
+cmd_preflight() {
+  sayto "Basically, I'm going to give your computer a voice. Every reply I finish will end with a short spoken summary through your speakers, from a voice engine that runs on this machine only. Nothing goes to the cloud."
+  sayto "What will change: (1) a voice engine runs in the background, normally a Docker container, about 1.5 GB of memory; (2) one hook line in the agent's config so it hands me each finished reply; (3) a one-page writing rule appended to the agent's instructions file; (4) a folder ~/.talking-computer for the log and voice choice. Nothing else."
+  ok "os: $OS $( [[ $OS == Darwin ]] && sw_vers -productVersion || uname -r ) $(uname -m)"
+  command -v python3 >/dev/null && ok "python: $(python3 --version 2>&1)" || { fail "python3 not found"; next "ask the user to install Python 3, then ./tc preflight"; return 1; }
+  local ap; ap=$(audio_player); [[ -n "$ap" ]] && ok "audio player: $ap" || warn "no audio player found (Linux: sudo apt install -y pulseaudio-utils)"
+  local free; free=$(df -Pk "$HOME" | awk 'NR==2{printf "%.0f", $4/1048576}'); ok "free disk: ${free} GB (need about 6)"
+  if kokoro_up; then ok "voice engine already running on :$PORT"; next "./tc engine"; return 0; fi
+  if docker_running; then
+    ok "docker: installed and running"; next "./tc engine"
+  elif docker_installed && docker_socket_exists; then
+    warn "docker: installed, but not reachable from this process. Either Docker Desktop is not open, or this agent runs in a sandbox that blocks Docker's socket."
+    sayto "Ask: is Docker Desktop open (whale icon in the menu bar)? If not, please open it. If it is open, this session is sandboxed; that's fine, the next step will hand you one command to paste."
+    next "./tc engine"
+  elif docker_installed; then
+    warn "docker: installed but not running"
+    sayto "Please open Docker Desktop (or on Linux: sudo systemctl start docker), then tell me."
+    next "./tc preflight"
+  else
+    warn "docker: not installed"
+    if [[ $OS == Darwin ]] && (( $(mac_major) < 14 )); then
+      sayto "Docker Desktop needs macOS 14 or newer and this Mac is on $(sw_vers -productVersion). No problem: the voice engine can run natively, no Docker, about 5 minutes and 2 GB of disk. On Apple Silicon it uses the Mac's GPU."
+      next "./tc engine --native"
+    else
+      sayto "Docker isn't installed. Two options. A: I install Docker for you, a free app that runs programs in sealed boxes, about 600 MB, you accept its terms once when it opens. B: skip Docker and run the voice engine natively from source in its own isolated Python, about 5 minutes and 2 GB. Which do you prefer?"
+      next "A: ./tc engine --install-docker      B: ./tc engine --native"
+    fi
+  fi
+}
+
+# ---------------------------------------------------------------- engine
+install_docker() {
+  case "$OS" in
+    Darwin)
+      (( $(mac_major) < 14 )) && { warn "macOS $(sw_vers -productVersion) is below Docker Desktop's minimum (14). Falling back to native."; return 1; }
+      command -v brew >/dev/null || { warn "Homebrew not found, cannot install Docker automatically."; handoff "Install Docker Desktop from https://docs.docker.com/desktop/setup/install/mac-install/ , open it once, then run: bash $KIT_DIR/tc engine"; return 2; }
+      sayto "Installing Docker Desktop with Homebrew. This downloads about 600 MB."
+      brew install --cask docker >/dev/null 2>&1 || { fail "brew install --cask docker failed"; return 1; }
+      sayto "Opening Docker Desktop. It will ask you to accept its terms the first time. Tell me when you've done that."
+      open -a Docker 2>/dev/null || true
+      for _ in $(seq 1 90); do docker_running && return 0; sleep 2; done
+      handoff "Open Docker Desktop and accept its terms. When the whale icon is steady, run: bash $KIT_DIR/tc engine"; return 2;;
+    Linux)
+      handoff "curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker \$USER && newgrp docker      (installs Docker Engine; needs your password). Then: bash $KIT_DIR/tc engine"; return 2;;
+    *) handoff "Install Docker Desktop with WSL2: https://docs.docker.com/desktop/setup/install/windows-install/  then: bash $KIT_DIR/tc engine"; return 2;;
+  esac
+}
+cmd_engine() {
+  local want=""; for a in "$@"; do case $a in --install-docker) want=install;; --native) want=native;; esac; done
+  if kokoro_up; then ok "voice engine already running on :$PORT"; hello; return 0; fi
+  if [[ $want == native ]] || { [[ -z $want ]] && [[ $(engine_kind) == native ]]; }; then
+    sayto "Installing the voice engine natively: its own isolated Python 3.12 environment, PyTorch, and the 330 MB Kokoro model. About five minutes. No Docker, nothing installed into your system Python."
+    bash "$KIT_DIR/native/kokoro-native.sh" install || { fail "native install failed. See $TC_HOME/kokoro.log"; return 1; }
+    bash "$KIT_DIR/native/kokoro-native.sh" start   || { fail "native engine did not start. See $TC_HOME/kokoro.log"; return 1; }
+    bash "$KIT_DIR/native/kokoro-native.sh" autostart >/dev/null 2>&1 && ok "engine will start automatically at login" || warn "autostart not installed; after a reboot run: bash $KIT_DIR/native/kokoro-native.sh start"
+    ok "voice engine (native) running on :$PORT"; hello; return 0
+  fi
+  if ! docker_installed; then
+    if [[ $want == install ]]; then
+      install_docker; local rc=$?
+      [[ $rc -eq 2 ]] && return 2
+      [[ $rc -eq 1 ]] && { sayto "Switching to the native engine."; cmd_engine --native; return $?; }
+    else
+      fail "Docker is not installed and no choice was made"; next "./tc engine --install-docker      or      ./tc engine --native"; return 1
+    fi
+  fi
+  if ! docker_running; then
+    if docker_socket_exists; then
+      handoff "cd \"$KIT_DIR\" && docker compose up -d      (starts the voice container; make sure Docker Desktop is open first). Then: bash $KIT_DIR/tc engine"
+    else
+      sayto "Docker is installed but not running. Please open Docker Desktop, wait for the whale icon to settle, then tell me."
+      next "./tc engine"
+    fi
+    return 2
+  fi
+  sayto "Starting the Kokoro voice engine in Docker. The first time downloads about 5 GB, so this can take a few minutes."
+  if ! ( cd "$KIT_DIR" && docker compose up -d >"$TC_HOME/compose.log" 2>&1 ); then
+    if grep -qiE 'permission denied|operation not permitted|cannot connect' "$TC_HOME/compose.log"; then
+      handoff "cd \"$KIT_DIR\" && docker compose up -d      (this sandbox can't reach Docker; your Terminal can). Then: bash $KIT_DIR/tc engine"; return 2
+    fi
+    fail "docker compose failed: $(tail -1 "$TC_HOME/compose.log")"; return 1
+  fi
+  for _ in $(seq 1 150); do kokoro_up && break; sleep 2; done
+  kokoro_up || { fail "container started but the engine isn't answering yet"; next "wait a minute, then: ./tc engine   (or: docker logs talking-computer-kokoro)"; return 1; }
+  ok "voice engine (docker) running on :$PORT"; hello
+}
+
+cmd_sound_check() {
+  local ap; ap=$(audio_player)
+  [[ -n "$ap" ]] && ok "audio player: $ap" || { fail "no audio player. Linux: sudo apt install -y pulseaudio-utils   then ./tc sound-check"; return 1; }
+  kokoro_up && ok "engine answering" || { fail "engine not answering on :$PORT"; next "./tc engine"; return 1; }
+  [[ -f "$TC_HOME/speak.log" ]] && { echo "--- last log lines ---"; tail -3 "$TC_HOME/speak.log"; }
+  sayto "Check the volume slider and that sound output is set to the speakers you expect (System Settings > Sound). Playing the hello again now."
+  $SPEAK --hello
+  next "heard it: ./tc audition      still silent: tell the user what the log says and fix that first"
+}
+
+# ---------------------------------------------------------------- voice
+cmd_audition() {
+  kokoro_up || { fail "engine not running"; next "./tc engine"; return 1; }
+  sayto "Four voices will read the same sentence, the kind you'll actually hear later. Listen for the one you want to live with."
+  $SPEAK --audition
+  sayto "Ask which voice they want, and whether they want to give it a name. The name is what it will call itself."
+  next "./tc choose <voice id> [name]     e.g.  ./tc choose bm_george George     (replay one: SPEAK_VOICE=<id> $SPEAK --text \"...\")"
+}
+cmd_choose() {
+  [[ $# -ge 1 ]] || { fail "usage: ./tc choose <voice id> [name]"; return 1; }
+  $SPEAK --choose "$@" || return 1
+  $SPEAK --text "From now on, this is what I sound like."
+  ok "voice saved: $($SPEAK --show | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["voice"], d["name"] or "(no name)")')"
+  sayto "Ask: is that the one? If yes, move on. If not, run choose again with another id."
+  next "./tc hook"
+}
+
+# ---------------------------------------------------------------- hook
+cmd_hook() {
+  local agent="" remote=0 prev=""
+  for a in "$@"; do case $a in --remote) remote=1;; codex|claude|both) [[ $prev == --agent ]] && agent=$a;; esac; prev=$a; done
+  if [[ -z $agent ]]; then
+    if have_codex && have_claude; then agent=both; elif have_claude; then agent=claude; elif have_codex; then agent=codex; else fail "neither Codex nor Claude Code found"; return 1; fi
+  fi
+  local remote_url="http://127.0.0.1:${SPEAK_LISTEN_PORT:-9876}"
+  ok "agents: $agent"
+  if [[ $agent == codex || $agent == both ]]; then
+    mkdir -p "$CODEX_DIR"; local cfg="$CODEX_DIR/config.toml"; touch "$cfg"
+    local line; if [[ $remote -eq 1 ]]; then line="notify = [\"env\", \"SPEAK_REMOTE_URL=$remote_url\", \"python3\", \"$KIT_DIR/speak.py\", \"--notify\"]"
+    else line="notify = [\"python3\", \"$KIT_DIR/speak.py\", \"--notify\"]"; fi
+    if grep -qE '^\s*notify\s*=' "$cfg"; then
+      python3 - "$cfg" "$line" <<'PY'
+import re, sys
+p, line = sys.argv[1], sys.argv[2]; s = open(p).read()
+open(p, 'w').write(re.sub(r'^\s*notify\s*=.*$', line, s, count=1, flags=re.M))
+PY
+    else { echo "$line"; cat "$cfg"; } > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"; fi
+    ok "codex: $cfg now has:  $line"
+  fi
+  if [[ $agent == claude || $agent == both ]]; then
+    mkdir -p "$CLAUDE_DIR"; local set="$CLAUDE_DIR/settings.json"; [[ -f $set ]] || echo '{}' > "$set"
+    local cmd; if [[ $remote -eq 1 ]]; then cmd="SPEAK_REMOTE_URL=$remote_url python3 $KIT_DIR/speak.py --stop-hook"; else cmd="python3 $KIT_DIR/speak.py --stop-hook"; fi
+    python3 - "$set" "$cmd" <<'PY'
+import json, sys
+p, cmd = sys.argv[1], sys.argv[2]
+try: cfg = json.load(open(p))
+except Exception: cfg = {}
+stops = cfg.setdefault("hooks", {}).setdefault("Stop", [])
+stops[:] = [s for s in stops if "speak.py --stop-hook" not in json.dumps(s)]
+stops.append({"matcher": "", "hooks": [{"type": "command", "command": cmd}]})
+json.dump(cfg, open(p, "w"), indent=2)
+PY
+    ok "claude code: $set has a Stop hook:  $cmd"
+  fi
+  sayto "Hook is in. Now a proof: I'll simulate a finished reply and you should hear the voice speak its summary."
+  if [[ $remote -eq 1 ]]; then
+    curl -fsS -m 3 "$remote_url" >/dev/null 2>&1 && curl -s -m 60 -X POST --data-raw "The hook between the agent and the voice is connected." "$remote_url" >/dev/null \
+      || warn "nothing answering on $remote_url yet; open the tunnel from the laptop (remote/README.md) and rerun ./tc hook --remote"
+  else
+    kokoro_up || { fail "engine not running, can't prove the hook out loud"; next "./tc engine, then ./tc hook"; return 1; }
+    if [[ $agent == codex || $agent == both ]]; then
+      SPEAK_FOREGROUND=1 $SPEAK --notify '{"type":"agent-turn-complete","last-assistant-message":"Screen text.\n\n===SPEAK=== The hook between the agent and the voice is connected, so every reply can now be spoken."}'
+    fi
+    if [[ $agent == claude || $agent == both ]]; then
+      local t="$TC_HOME/hook-test.jsonl"
+      printf '%s\n' '{"message":{"role":"assistant","content":[{"type":"text","text":"Screen text.\n\n===SPEAK=== And this is the Claude Code path, connected the same way."}]}}' > "$t"
+      echo "{\"transcript_path\":\"$t\"}" | SPEAK_FOREGROUND=1 $SPEAK --stop-hook
+    fi
+  fi
+  sayto "Ask: did you hear that? If yes, the plumbing is done."
+  next "./tc rule"
+}
+
+# ---------------------------------------------------------------- rule
+cmd_rule() {
+  local did=0
+  if have_codex; then
+    mkdir -p "$CODEX_DIR"; local ag="$CODEX_DIR/AGENTS.md"; touch "$ag"
+    grep -q '===SPEAK===' "$ag" || { echo; cat "$KIT_DIR/AGENTS.md.snippet"; } >> "$ag"
+    ok "codex: rule present in $ag ($(grep -c '===SPEAK===' "$ag") mentions)"; did=1
+  fi
+  if have_claude; then
+    mkdir -p "$CLAUDE_DIR"; local cm="$CLAUDE_DIR/CLAUDE.md"; touch "$cm"
+    grep -q '===SPEAK===' "$cm" || { echo; cat "$KIT_DIR/AGENTS.md.snippet"; } >> "$cm"
+    ok "claude code: rule present in $cm ($(grep -c '===SPEAK===' "$cm") mentions)"; did=1
+  fi
+  [[ $did -eq 1 ]] || { fail "no agent found to install the rule for"; return 1; }
+  sayto "The writing rule is in place: from the next new session on, every reply ends with a two-to-four sentence spoken summary in plain language, no file names or code. Offer to show it: it's about a page, at the end of the instructions file."
+  next "./tc finish"
+}
+
+# ---------------------------------------------------------------- finish
+cmd_finish() {
+  local kind; kind=$(engine_kind)
+  sayto "Setup is complete. On this machine now: (1) the voice engine, $kind, listening only on this computer; (2) the agent hook; (3) the writing rule; (4) the log and voice choice in ~/.talking-computer."
+  sayto "To turn it off: ./tc off. Back on: ./tc on. If it ever goes quiet, look at ~/.talking-computer/speak.log."
+  sayto "Important: this session started before the rule existed, so it won't speak here. Start a fresh session and the first reply will."
+  kokoro_up && $SPEAK --wakeup || warn "engine not running; skipped the wake-up line"
+  sayto "Offer these add-ons, all optional: change the voice later (./tc audition, ./tc choose); speech speed (edit \"speed\" in ~/.talking-computer/config.json); hear it on another device over SSH (remote/README.md); wire the other agent too (./tc hook --agent both, ./tc rule)."
+  next "none. Tell the user to start a new session and say hello."
+}
+
+# ---------------------------------------------------------------- utilities
+cmd_status() {
+  kokoro_up && ok "engine: running ($(engine_kind)) on :$PORT" || warn "engine: not running ($(engine_kind))"
+  [[ -f "$CODEX_DIR/config.toml" ]] && grep -q 'speak.py' "$CODEX_DIR/config.toml" && ok "codex hook: yes" || warn "codex hook: no"
+  [[ -f "$CLAUDE_DIR/settings.json" ]] && grep -q 'speak.py --stop-hook' "$CLAUDE_DIR/settings.json" && ok "claude code hook: yes" || warn "claude code hook: no"
+  [[ -f "$CODEX_DIR/AGENTS.md" ]] && grep -q '===SPEAK===' "$CODEX_DIR/AGENTS.md" && ok "codex rule: yes" || warn "codex rule: no"
+  [[ -f "$CLAUDE_DIR/CLAUDE.md" ]] && grep -q '===SPEAK===' "$CLAUDE_DIR/CLAUDE.md" && ok "claude code rule: yes" || warn "claude code rule: no"
+  ok "voice: $($SPEAK --show | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["voice"], d["name"] or "(no name)")')"
+}
+cmd_off() { case $(engine_kind) in docker) (cd "$KIT_DIR" && docker compose stop >/dev/null 2>&1) && ok "engine stopped";; native) bash "$KIT_DIR/native/kokoro-native.sh" stop;; *) warn "no engine installed";; esac; }
+cmd_on()  {
+  case $(engine_kind) in
+    docker) (cd "$KIT_DIR" && docker compose start >/dev/null 2>&1) || { fail "docker compose start failed"; return 1; };;
+    native) bash "$KIT_DIR/native/kokoro-native.sh" start; return $?;;
+    *) warn "no engine installed"; next "./tc engine"; return 1;;
+  esac
+  for _ in $(seq 1 45); do kokoro_up && break; sleep 2; done
+  kokoro_up && ok "engine running on :$PORT" || { fail "engine started but not answering yet"; next "wait a minute, then ./tc status"; }
+}
+cmd_all() { cmd_preflight && cmd_engine "$@" && cmd_hook && cmd_rule && cmd_finish; sayto "Default voice was used. To pick one: ./tc audition, then ./tc choose."; }
+
+case "${1:-}" in
+  preflight) cmd_preflight;; engine) shift; cmd_engine "$@";; sound-check) cmd_sound_check;;
+  audition) cmd_audition;; choose) shift; cmd_choose "$@";; hook) shift; cmd_hook "$@";; rule) cmd_rule;;
+  finish) cmd_finish;; status) cmd_status;; off) cmd_off;; on) cmd_on;; all) shift; cmd_all "$@";;
+  *) sed -n '2,20p' "$0"; exit 1;;
+esac

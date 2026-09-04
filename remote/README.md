@@ -4,7 +4,7 @@ This is an add-on. Skip it unless the agent and the speakers are on different ma
 
 Two shapes it covers:
 
-1. **Agent on a server, speakers on this laptop** (most common). The laptop runs Kokoro and a tiny listener. An SSH reverse tunnel carries the server's port 9876 back to the laptop. The server installs with `bash install.sh --remote` and needs no Docker or audio.
+1. **Agent on a server, speakers on this laptop** (most common). The laptop runs Kokoro and a tiny listener. An SSH reverse tunnel carries the server's port 9876 back to the laptop. The server runs `./tc hook --remote` and `./tc rule` and needs no Docker or audio.
 2. **Agent on this laptop, speakers elsewhere.** Same pieces, mirrored: the other device runs Kokoro and the listener, and this laptop forwards to it. Set `SPEAK_REMOTE_URL` to that device's listener address in the notify line.
 
 ```
@@ -24,7 +24,7 @@ Follow the same rhythm as the main guide: explain, ask, do, prove, summarize.
 
 **On the server (agent):**
 1. Copy or clone this folder.
-2. `bash install.sh --remote`. It wires the hook for whichever agent is installed (Codex notify line, Claude Code Stop hook) with `SPEAK_REMOTE_URL=http://127.0.0.1:9876`, and appends the rule. No Docker.
+2. `./tc hook --remote` then `./tc rule`. The hook forwards each spoken line to `http://127.0.0.1:9876`, which the tunnel carries to the laptop. No Docker.
 3. Prove, with the tunnel open: `curl http://127.0.0.1:9876` on the server prints the "alive" line, and `curl -X POST --data-raw "tunnel test" http://127.0.0.1:9876` is heard on the laptop.
 
 If step 3 is silent: the tunnel is not open (log in again or run tunnel.sh), or the listener is down (`launchctl list | grep speak` on macOS, `systemctl --user status talking-computer-listener` on Linux).
